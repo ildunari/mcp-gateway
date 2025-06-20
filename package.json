@@ -1,8 +1,17 @@
 {
-  "name": "mcp-gateway",
-  "version": "1.0.0",
+  "name": "@ildunari/mcp-gateway",
+  "version": "0.1.0",
   "description": "MCP Gateway for hosting multiple MCP servers accessible from Claude.ai",
   "main": "src/server.js",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ildunari/mcp-gateway.git"
+  },
+  "homepage": "https://github.com/ildunari/mcp-gateway#readme",
+  "bugs": {
+    "url": "https://github.com/ildunari/mcp-gateway/issues"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "NODE_ENV=development node --watch src/server.js",

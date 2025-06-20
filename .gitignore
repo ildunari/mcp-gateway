@@ -41,5 +41,12 @@ build/
 tmp/
 temp/
 
-# Serena cache files
+# Serena files
 .serena/cache/
+.serena/*.pkl
+.serena/**/*.pkl
+
+# Claude Code files
+.claude/
+claude.json
+.claude-code/
