@@ -1,3 +1,6 @@
+# Private setup guide
+gateway.md
+
 # Environment variables - NEVER commit these!
 .env
 .env.local
