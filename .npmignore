@@ -1,0 +1,41 @@
+# Source control
+.git/
+.gitignore
+
+# Development files
+.env
+.env.*
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+
+# Serena files
+.serena/
+
+# Claude files
+CLAUDE.md
+.claude/
+
+# Documentation source
+docs/
+
+# Test files
+tests/
+*.test.js
+coverage/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Config files that shouldn't be published
+.prettierrc
+.eslintrc
+tsconfig.json
+
+# GitHub specific
+.github/
+CONTRIBUTING.md
