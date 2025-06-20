@@ -1,6 +1,6 @@
 {
   "name": "@ildunari/mcp-gateway",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP Gateway for hosting multiple MCP servers accessible from Claude.ai",
   "main": "src/server.js",
   "type": "module",
@@ -18,7 +18,11 @@
     "dev:windows": "set NODE_ENV=development && node --watch src/server.js",
     "test": "NODE_ENV=development node src/server.js"
   },
-  "keywords": ["mcp", "gateway", "claude"],
+  "keywords": [
+    "mcp",
+    "gateway",
+    "claude"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
