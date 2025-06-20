@@ -92,3 +92,32 @@ When implementing features, prioritize:
 - Reliability (proper error handling, process cleanup)
 - Performance (efficient routing, minimal overhead)
 - Logging (comprehensive debug information)
+
+## Deployment Information
+
+### Repository & Package
+- **GitHub**: https://github.com/ildunari/mcp-gateway (already authenticated)
+- **npm Package**: @ildunari/mcp-gateway (already authenticated)
+- **Current Version**: 0.1.0
+
+### Deployment Commands
+```bash
+# After making changes, commit and push to both GitHub and npm:
+
+# 1. Commit locally
+git add .
+git commit -m "Description of changes"
+
+# 2. Push to GitHub
+git push origin main
+
+# 3. For releases, bump version and publish to npm
+npm version patch  # or minor/major
+npm publish --access public
+git push origin main --tags
+
+# Quick deployment (patch release)
+npm version patch && npm publish --access public && git push origin main --tags
+```
+
+**Important**: We are already logged in to both GitHub and npm, so these commands will work directly without additional authentication.
