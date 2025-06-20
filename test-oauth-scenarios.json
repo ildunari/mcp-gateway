@@ -1,0 +1,315 @@
+{
+  "scenarios": [
+    {
+      "id": "discovery-endpoint",
+      "name": "OAuth Discovery Endpoint",
+      "description": "Verify OAuth discovery endpoint returns correct metadata",
+      "endpoint": "/.well-known/oauth-authorization-server",
+      "method": "GET",
+      "expected": {
+        "status": 200,
+        "response": {
+          "issuer": "${BASE_URL}",
+          "authorization_endpoint": "${BASE_URL}/oauth/authorize",
+          "token_endpoint": "${BASE_URL}/oauth/token",
+          "response_types_supported": ["code"],
+          "grant_types_supported": ["authorization_code"],
+          "code_challenge_methods_supported": ["S256", "plain"],
+          "scopes_supported": ["mcp:all"]
+        }
+      }
+    },
+    {
+      "id": "authorization-valid",
+      "name": "Valid Authorization Request",
+      "description": "Test successful authorization with all required parameters",
+      "endpoint": "/oauth/authorize",
+      "method": "GET",
+      "parameters": {
+        "response_type": "code",
+        "client_id": "claude-ai-client",
+        "redirect_uri": "https://claude.ai/oauth/callback",
+        "state": "${RANDOM_UUID}",
+        "scope": "mcp:all"
+      },
+      "expected": {
+        "status": 302,
+        "location": {
+          "contains": "code=",
+          "preserves_state": true
+        }
+      }
+    },
+    {
+      "id": "authorization-missing-state",
+      "name": "Authorization Missing State",
+      "description": "Test authorization request without required state parameter",
+      "endpoint": "/oauth/authorize",
+      "method": "GET",
+      "parameters": {
+        "response_type": "code",
+        "client_id": "claude-ai-client",
+        "redirect_uri": "https://claude.ai/oauth/callback"
+      },
+      "expected": {
+        "status": 400,
+        "response": {
+          "error": "invalid_request",
+          "error_description": "Missing required parameters: redirect_uri and state are required"
+        }
+      }
+    },
+    {
+      "id": "authorization-pkce",
+      "name": "Authorization with PKCE",
+      "description": "Test authorization with PKCE code challenge",
+      "endpoint": "/oauth/authorize",
+      "method": "GET",
+      "parameters": {
+        "response_type": "code",
+        "client_id": "claude-ai-client",
+        "redirect_uri": "https://claude.ai/oauth/callback",
+        "state": "${RANDOM_UUID}",
+        "code_challenge": "${CODE_CHALLENGE}",
+        "code_challenge_method": "S256"
+      },
+      "expected": {
+        "status": 302,
+        "location": {
+          "contains": "code=",
+          "preserves_state": true
+        }
+      }
+    },
+    {
+      "id": "token-exchange-valid",
+      "name": "Valid Token Exchange",
+      "description": "Exchange authorization code for access token",
+      "endpoint": "/oauth/token",
+      "method": "POST",
+      "headers": {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      "body": {
+        "grant_type": "authorization_code",
+        "code": "${VALID_AUTH_CODE}",
+        "redirect_uri": "https://claude.ai/oauth/callback",
+        "client_id": "claude-ai-client"
+      },
+      "expected": {
+        "status": 200,
+        "response": {
+          "access_token": "${GATEWAY_AUTH_TOKEN}",
+          "token_type": "Bearer",
+          "expires_in": 31536000,
+          "scope": "mcp:all"
+        }
+      }
+    },
+    {
+      "id": "token-exchange-invalid-grant",
+      "name": "Token Exchange Invalid Grant Type",
+      "description": "Test token endpoint with unsupported grant type",
+      "endpoint": "/oauth/token",
+      "method": "POST",
+      "headers": {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      "body": {
+        "grant_type": "password",
+        "code": "test",
+        "redirect_uri": "https://claude.ai/oauth/callback"
+      },
+      "expected": {
+        "status": 400,
+        "response": {
+          "error": "unsupported_grant_type",
+          "error_description": "Only \"authorization_code\" grant type is supported"
+        }
+      }
+    },
+    {
+      "id": "token-exchange-invalid-code",
+      "name": "Token Exchange Invalid Code",
+      "description": "Test token exchange with invalid authorization code",
+      "endpoint": "/oauth/token",
+      "method": "POST",
+      "headers": {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      "body": {
+        "grant_type": "authorization_code",
+        "code": "invalid-code-12345",
+        "redirect_uri": "https://claude.ai/oauth/callback",
+        "client_id": "claude-ai-client"
+      },
+      "expected": {
+        "status": 400,
+        "response": {
+          "error": "invalid_grant",
+          "error_description": "Invalid or expired authorization code"
+        }
+      }
+    },
+    {
+      "id": "token-exchange-redirect-mismatch",
+      "name": "Token Exchange Redirect URI Mismatch",
+      "description": "Test token exchange with mismatched redirect URI",
+      "endpoint": "/oauth/token",
+      "method": "POST",
+      "headers": {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      "body": {
+        "grant_type": "authorization_code",
+        "code": "${VALID_AUTH_CODE}",
+        "redirect_uri": "https://wrong-uri.com/callback",
+        "client_id": "claude-ai-client"
+      },
+      "expected": {
+        "status": 400,
+        "response": {
+          "error": "invalid_grant",
+          "error_description": "Redirect URI does not match the one used during authorization"
+        }
+      }
+    },
+    {
+      "id": "token-exchange-expired-code",
+      "name": "Token Exchange Expired Code",
+      "description": "Test token exchange with expired authorization code",
+      "endpoint": "/oauth/token",
+      "method": "POST",
+      "headers": {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      "body": {
+        "grant_type": "authorization_code",
+        "code": "${EXPIRED_AUTH_CODE}",
+        "redirect_uri": "https://claude.ai/oauth/callback",
+        "client_id": "claude-ai-client"
+      },
+      "expected": {
+        "status": 400,
+        "response": {
+          "error": "invalid_grant",
+          "error_description": "Authorization code has expired"
+        }
+      }
+    },
+    {
+      "id": "pkce-token-exchange",
+      "name": "PKCE Token Exchange",
+      "description": "Test token exchange with PKCE code verifier",
+      "endpoint": "/oauth/token",
+      "method": "POST",
+      "headers": {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      "body": {
+        "grant_type": "authorization_code",
+        "code": "${PKCE_AUTH_CODE}",
+        "redirect_uri": "https://claude.ai/oauth/callback",
+        "client_id": "claude-ai-client",
+        "code_verifier": "${CODE_VERIFIER}"
+      },
+      "expected": {
+        "status": 200,
+        "response": {
+          "access_token": "${GATEWAY_AUTH_TOKEN}",
+          "token_type": "Bearer"
+        }
+      }
+    },
+    {
+      "id": "pkce-invalid-verifier",
+      "name": "PKCE Invalid Verifier",
+      "description": "Test PKCE token exchange with invalid code verifier",
+      "endpoint": "/oauth/token",
+      "method": "POST",
+      "headers": {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      "body": {
+        "grant_type": "authorization_code",
+        "code": "${PKCE_AUTH_CODE}",
+        "redirect_uri": "https://claude.ai/oauth/callback",
+        "client_id": "claude-ai-client",
+        "code_verifier": "wrong-verifier"
+      },
+      "expected": {
+        "status": 400,
+        "response": {
+          "error": "invalid_grant",
+          "error_description": "Code verifier does not match code challenge"
+        }
+      }
+    },
+    {
+      "id": "complete-flow",
+      "name": "Complete OAuth Flow",
+      "description": "Test complete OAuth flow from authorization to API access",
+      "steps": [
+        {
+          "name": "Request Authorization",
+          "action": "GET /oauth/authorize with parameters",
+          "validates": "Receive authorization code"
+        },
+        {
+          "name": "Exchange Code for Token",
+          "action": "POST /oauth/token with code",
+          "validates": "Receive access token"
+        },
+        {
+          "name": "Access Protected Resource",
+          "action": "GET /health with Bearer token",
+          "validates": "Successfully access API"
+        }
+      ]
+    }
+  ],
+  "security_validations": [
+    {
+      "name": "State Parameter CSRF Protection",
+      "description": "Verify state parameter is preserved throughout flow to prevent CSRF attacks"
+    },
+    {
+      "name": "Authorization Code Single Use",
+      "description": "Verify authorization codes can only be used once"
+    },
+    {
+      "name": "Code Expiration",
+      "description": "Verify authorization codes expire after 10 minutes"
+    },
+    {
+      "name": "Redirect URI Validation",
+      "description": "Verify redirect URI must match between authorization and token requests"
+    },
+    {
+      "name": "PKCE Verification",
+      "description": "Verify code challenge and verifier are properly validated"
+    },
+    {
+      "name": "Token Format",
+      "description": "Verify tokens are returned in proper OAuth 2.0 format"
+    }
+  ],
+  "claude_ai_specific": [
+    {
+      "name": "Dynamic Client Registration",
+      "note": "Claude.ai requires Dynamic Client Registration support (not implemented in this personal gateway)"
+    },
+    {
+      "name": "Auto-Approval",
+      "note": "Personal gateway auto-approves all requests without user interaction"
+    },
+    {
+      "name": "Token Lifetime",
+      "note": "Using 1-year token lifetime for convenience in personal use"
+    },
+    {
+      "name": "Scope Support",
+      "note": "Currently only supports 'mcp:all' scope"
+    }
+  ]
+}
