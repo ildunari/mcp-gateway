@@ -1,0 +1,44 @@
+{
+  "servers": [
+    {
+      "name": "github",
+      "path": "github",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "enabled": true,
+      "description": "GitHub MCP Server - Access repositories, files, issues, and PRs"
+    },
+    {
+      "name": "filesystem",
+      "path": "filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "--allowed-directories", "${HOME}/Documents,${HOME}/Desktop"],
+      "env": {},
+      "enabled": true,
+      "description": "Filesystem MCP Server - Read and write local files"
+    },
+    {
+      "name": "brave-search",
+      "path": "brave-search",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+      },
+      "enabled": false,
+      "description": "Brave Search MCP Server - Web search capabilities"
+    },
+    {
+      "name": "desktop-commander",
+      "path": "desktop",
+      "command": "npx",
+      "args": ["-y", "@wonderwhy-er/desktop-commander@latest"],
+      "env": {},
+      "enabled": false,
+      "description": "Desktop Commander - Control desktop applications"
+    }
+  ]
+}
