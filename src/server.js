@@ -188,14 +188,21 @@ app.use((err, req, res, next) => {
 
 // Start server
 const PORT = process.env.PORT || 4242;
-const server = app.listen(PORT, () => {
-  logger.info(`MCP Gateway running on port ${PORT}`);
-  logger.info('Available servers:', registry.listServers().map(s => s.name));
-  
-  if (process.env.NODE_ENV === 'production') {
-    logger.info('Production URL: https://gateway.pluginpapi.dev');
-  } else {
-    logger.info('Development URL: http://localhost:' + PORT);
+const server = app.listen(PORT, async () => {
+  try {
+    // Initialize registry after server starts
+    await registry.initialize();
+    logger.info(`MCP Gateway running on port ${PORT}`);
+    logger.info('Available servers:', registry.listServers().map(s => s.name));
+    
+    if (process.env.NODE_ENV === 'production') {
+      logger.info('Production URL: https://gateway.pluginpapi.dev');
+    } else {
+      logger.info('Development URL: http://localhost:' + PORT);
+    }
+  } catch (error) {
+    logger.error('Failed to initialize registry:', error);
+    process.exit(1);
   }
 });
 

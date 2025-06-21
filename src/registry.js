@@ -4,6 +4,9 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { EventEmitter } from 'events';
 import winston from 'winston';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -21,13 +24,16 @@ const CLEANUP_INTERVAL = 60 * 1000;
  */
 export class ServerRegistry extends EventEmitter {
   constructor(logger = winston.createLogger()) {
-    super();
-    this.logger = logger;
-    this.servers = new Map(); // name -> server config
-    this.sessions = new Map(); // sessionId -> session info
-    this.processes = new Map(); // serverId -> process info
-    this.cleanupInterval = null;
-  }
+      super();
+      this.logger = logger;
+      this.servers = new Map(); // name -> server config
+      this.sessions = new Map(); // sessionId -> session info
+      this.processes = new Map(); // serverId -> process info
+      this.transports = new Map(); // sessionId -> StreamableHTTPServerTransport
+      this.clients = new Map(); // sessionId -> MCP client
+      this.cleanupInterval = null;
+    }
+
 
   /**
    * Initialize the registry by loading server configurations
@@ -180,68 +186,69 @@ export class ServerRegistry extends EventEmitter {
   }
 
   /**
+   * @deprecated - Replaced by Streamable HTTP transport
    * Handle SSE connection for a session
    * @param {string} sessionId - Session ID
    * @param {Object} res - Express response object
    * @returns {Promise<void>}
    */
-  async handleSSEConnection(sessionId, res) {
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new Error(`Session ${sessionId} not found`);
-    }
+  // async handleSSEConnection(sessionId, res) {
+  //   const session = this.getSession(sessionId);
+  //   if (!session) {
+  //     throw new Error(`Session ${sessionId} not found`);
+  //   }
 
-    // Set SSE headers
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no', // Disable Nginx buffering
-    });
+  //   // Set SSE headers
+  //   res.writeHead(200, {
+  //     'Content-Type': 'text/event-stream',
+  //     'Cache-Control': 'no-cache',
+  //     'Connection': 'keep-alive',
+  //     'X-Accel-Buffering': 'no', // Disable Nginx buffering
+  //   });
 
-    // Send initial connection event
-    res.write(`event: connection\ndata: {"sessionId":"${sessionId}"}\n\n`);
+  //   // Send initial connection event
+  //   res.write(`event: connection\ndata: {"sessionId":"${sessionId}"}\n\n`);
 
-    // Set up message handler for this connection
-    const messageHandler = (message) => {
-      try {
-        res.write(`event: message\ndata: ${JSON.stringify(message)}\n\n`);
-      } catch (error) {
-        this.logger.error(`Failed to send SSE message:`, error);
-      }
-    };
+  //   // Set up message handler for this connection
+  //   const messageHandler = (message) => {
+  //     try {
+  //       res.write(`event: message\ndata: ${JSON.stringify(message)}\n\n`);
+  //     } catch (error) {
+  //       this.logger.error(`Failed to send SSE message:`, error);
+  //     }
+  //   };
 
-    // Store SSE connection in session
-    session.sseConnection = {
-      res,
-      messageHandler,
-    };
+  //   // Store SSE connection in session
+  //   session.sseConnection = {
+  //     res,
+  //     messageHandler,
+  //   };
 
-    // Send any queued messages
-    while (session.messageQueue.length > 0) {
-      const queuedMessage = session.messageQueue.shift();
-      messageHandler(queuedMessage);
-    }
+  //   // Send any queued messages
+  //   while (session.messageQueue.length > 0) {
+  //     const queuedMessage = session.messageQueue.shift();
+  //     messageHandler(queuedMessage);
+  //   }
 
-    // Handle connection close
-    res.on('close', () => {
-      this.logger.info(`SSE connection closed for session ${sessionId}`);
-      if (session.sseConnection) {
-        delete session.sseConnection;
-      }
-    });
+  //   // Handle connection close
+  //   res.on('close', () => {
+  //     this.logger.info(`SSE connection closed for session ${sessionId}`);
+  //     if (session.sseConnection) {
+  //       delete session.sseConnection;
+  //     }
+  //   });
 
-    // Keep connection alive with periodic pings
-    const pingInterval = setInterval(() => {
-      try {
-        res.write(':ping\n\n');
-      } catch (error) {
-        clearInterval(pingInterval);
-      }
-    }, 30000); // 30 seconds
+  //   // Keep connection alive with periodic pings
+  //   const pingInterval = setInterval(() => {
+  //     try {
+  //       res.write(':ping\n\n');
+  //     } catch (error) {
+  //       clearInterval(pingInterval);
+  //     }
+  //   }, 30000); // 30 seconds
 
-    res.on('close', () => clearInterval(pingInterval));
-  }
+  //   res.on('close', () => clearInterval(pingInterval));
+  // }
 
   /**
    * Handle POST request for a session
@@ -271,8 +278,215 @@ export class ServerRegistry extends EventEmitter {
       });
     });
   }
-
+  
   /**
+   * Get a unified request handler for a server
+   * @param {string} serverName - Name of the server
+   * @returns {Function|null} Express request handler or null if server not found
+   */
+  getHandler(serverName) {
+    // Try to find server by path first, then by name
+    let server = Array.from(this.servers.values()).find(s => s.path === serverName);
+    if (!server) {
+      server = this.servers.get(serverName);
+    }
+    if (!server) return null;
+    
+    return async (req, res) => {
+      try {
+        // Get session ID from header
+        const sessionId = req.headers['mcp-session-id'];
+        
+        // Handle based on method
+        switch (req.method) {
+          case 'POST':
+            await this._handleStreamablePostRequest(req, res, serverName);
+            break;
+          case 'GET':
+            await this._handleStreamableGetRequest(req, res, serverName);
+            break;
+          case 'DELETE':
+            await this._handleStreamableDeleteRequest(req, res, serverName);
+            break;
+          default:
+            res.status(405).json({ error: 'Method not allowed' });
+        }
+      } catch (error) {
+        this.logger.error(`Error in ${serverName} handler:`, error);
+        if (!res.headersSent) {
+          res.status(500).json({ 
+            jsonrpc: '2.0',
+            error: {
+              code: -32603,
+              message: 'Internal server error'
+            },
+            id: null
+          });
+        }
+      }
+    };
+  }
+  
+  /**
+   * Handle POST requests using Streamable HTTP transport
+   * @private
+   */
+  /**
+   * Handle POST requests using Streamable HTTP transport
+   * @private
+   */
+  async _handleStreamablePostRequest(req, res, serverName) {
+    const sessionId = req.headers['mcp-session-id'];
+    let transport;
+    
+    if (sessionId && this.transports.has(sessionId)) {
+      // Use existing transport
+      transport = this.transports.get(sessionId);
+    } else if (!sessionId) {
+    this.logger.info('No session ID, checking if initialize request:', { 
+      body: req.body,
+      isInit: isInitializeRequest(req.body)
+    });
+    if (!isInitializeRequest(req.body)) {
+      res.status(400).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32000,
+          message: 'Bad Request: No valid session ID provided'
+        },
+        id: null
+      });
+      return;
+    }
+      // Create new transport and session
+      const newSessionId = this._generateSessionId();
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => newSessionId,
+        onsessioninitialized: (sessionId) => {
+          this.logger.info(`Session initialized: ${sessionId} for server ${serverName}`);
+        }
+      });
+      
+      // Set up transport handlers
+      transport.onclose = () => {
+        const sid = transport.sessionId;
+        if (sid) {
+          this.logger.info(`Transport closed for session ${sid}`);
+          this.closeSession(sid);
+          this.transports.delete(sid);
+        }
+      };
+      
+      transport.onerror = (error) => {
+        this.logger.error(`Transport error for session ${transport.sessionId}:`, error);
+      };
+      
+      // Store transport
+      this.transports.set(newSessionId, transport);
+      
+      // Create session and get process
+      const sessionInfo = await this.createSession(serverName, newSessionId);
+      const session = this.sessions.get(newSessionId);
+      
+      // Set up message forwarding between transport and process
+      transport.onmessage = async (message) => {
+        try {
+          session.lastActivity = Date.now();
+          
+          // Forward to process via stdin
+          this.sendMessage(newSessionId, message, (response) => {
+            // Send response back through transport
+            transport.send(response, { relatedRequestId: message.id });
+          }).catch((error) => {
+            this.logger.error(`Error sending message to process:`, error);
+            transport.send({
+              jsonrpc: '2.0',
+              error: {
+                code: -32603,
+                message: 'Internal error processing request'
+              },
+              id: message.id || null
+            });
+          });
+        } catch (error) {
+          this.logger.error(`Error forwarding message:`, error);
+          await transport.send({
+            jsonrpc: '2.0',
+            error: {
+              code: -32603,
+              message: 'Internal error processing request'
+            },
+            id: message.id || null
+          });
+        }
+      };
+    } else {
+      // Invalid request - no session ID for non-initialization
+      res.status(400).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32000,
+          message: 'Bad Request: No valid session ID provided'
+        },
+        id: null
+      });
+      return;
+    }
+    
+    // Handle the request
+    await transport.handleRequest(req, res, req.body);
+  }
+
+  
+  /**
+   * Handle GET requests for SSE streams using Streamable HTTP transport
+   * @private
+   */
+  async _handleStreamableGetRequest(req, res, serverName) {
+    const sessionId = req.headers['mcp-session-id'];
+    
+    if (!sessionId || !this.transports.has(sessionId)) {
+      res.status(400).send('Invalid or missing session ID');
+      return;
+    }
+    
+    const transport = this.transports.get(sessionId);
+    const session = this.sessions.get(sessionId);
+    
+    if (session) {
+      session.lastActivity = Date.now();
+    }
+    
+    // Check for Last-Event-ID header for resumability
+    const lastEventId = req.headers['last-event-id'];
+    if (lastEventId) {
+      this.logger.info(`Client reconnecting with Last-Event-ID: ${lastEventId}`);
+    } else {
+      this.logger.info(`Establishing new SSE stream for session ${sessionId}`);
+    }
+    
+    await transport.handleRequest(req, res);
+  }
+  
+  /**
+   * Handle DELETE requests for session termination using Streamable HTTP transport
+   * @private
+   */
+  async _handleStreamableDeleteRequest(req, res, serverName) {
+    const sessionId = req.headers['mcp-session-id'];
+    
+    if (!sessionId || !this.transports.has(sessionId)) {
+      res.status(400).send('Invalid or missing session ID');
+      return;
+    }
+    
+    this.logger.info(`Received session termination request for session ${sessionId}`);
+    
+    const transport = this.transports.get(sessionId);
+    await transport.handleRequest(req, res);
+    
+    // Clean up will happen via transport.onclose handler
+  }  /**
    * Close a session
    * @param {string} sessionId - Session ID
    */
@@ -282,13 +496,15 @@ export class ServerRegistry extends EventEmitter {
       return;
     }
 
-    // Close SSE connection if exists
-    if (session.sseConnection) {
+    // Close transport if exists
+    const transport = this.transports.get(sessionId);
+    if (transport) {
       try {
-        session.sseConnection.res.end();
+        transport.close();
       } catch (error) {
-        // Connection might already be closed
+        this.logger.error(`Error closing transport for session ${sessionId}:`, error);
       }
+      this.transports.delete(sessionId);
     }
 
     // Clear response handlers
@@ -406,28 +622,33 @@ export class ServerRegistry extends EventEmitter {
    * @param {Object} message - JSON-RPC message
    */
   _handleServerMessage(serverId, message) {
-    // Find sessions for this server
-    const sessions = Array.from(this.sessions.values()).filter(
-      session => session.serverId === serverId
-    );
-
-    // Route message to appropriate sessions
-    for (const session of sessions) {
-      // Check if this is a response to a request
-      if (message.id && session.responseHandlers.has(message.id)) {
-        const { handler } = session.responseHandlers.get(message.id);
-        session.responseHandlers.delete(message.id);
-        handler(message);
-      } else {
-        // Send to SSE connection or queue
-        if (session.sseConnection) {
-          session.sseConnection.messageHandler(message);
+      // Find sessions for this server
+      const sessions = Array.from(this.sessions.values()).filter(
+        session => session.serverId === serverId
+      );
+  
+      // Route message to appropriate sessions
+      for (const session of sessions) {
+        // Check if this is a response to a request
+        if (message.id && session.responseHandlers.has(message.id)) {
+          const { handler } = session.responseHandlers.get(message.id);
+          session.responseHandlers.delete(message.id);
+          handler(message);
         } else {
-          session.messageQueue.push(message);
+          // Send to transport if available, otherwise queue
+          const transport = this.transports.get(session.id);
+          if (transport) {
+            transport.send(message).catch(error => {
+              this.logger.error(`Error sending message through transport:`, error);
+              session.messageQueue.push(message);
+            });
+          } else {
+            session.messageQueue.push(message);
+          }
         }
       }
     }
-  }
+
 
   /**
    * Check if process should be kept alive
@@ -578,4 +799,33 @@ export class ServerRegistry extends EventEmitter {
     this.processes.clear();
     this.servers.clear();
   }
-}
+  
+  /**
+   * Alias for getAvailableServers for compatibility
+   * @returns {Array} Array of server configurations
+   */
+  listServers() {
+    return this.getAvailableServers();
+  }
+  
+  /**
+   * Get the status of a server process
+   * @param {string} serverPath - Server path identifier
+   * @returns {string} Server status: 'running', 'stopped', or 'unknown'
+   */
+  getServerStatus(serverPath) {
+    const server = Array.from(this.servers.values()).find(s => s.path === serverPath);
+    if (!server) return 'unknown';
+    
+    const processInfo = this.processes.get(server.id);
+    if (!processInfo || processInfo.process.killed) return 'stopped';
+    return 'running';
+  }
+  
+  /**
+   * Alias for shutdown for compatibility
+   * @returns {Promise<void>}
+   */
+  async cleanup() {
+    return this.shutdown();
+  }}
